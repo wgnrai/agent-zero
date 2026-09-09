@@ -51,6 +51,10 @@
 - Helper modules own reusable framework APIs and must preserve public callers unless all callers, tests, and docs are updated together.
 - Plugins marked `always_enabled` remain in runtime discovery regardless of
   stale global or scoped disable files, and disable attempts are rejected.
+- `get_enabled_plugins()` isolates plugin-meta parse failures: a plugin whose
+  `plugin.yaml` fails to load is skipped with a loud error naming the plugin
+  and the parse error; it never crashes boot and never silently drops
+  (loud-but-contained contract, 2026-09-07).
 - Config hooks receive `hook_context={"caller": caller}` with one of `ui`,
   `agent`, or `api`; this is behavioral context, not an authorization boundary.
 - Plugin list, enabled-plugin, and enabled-path lookups cache empty results like any other value; `clear_plugin_cache` and plugin watchdog events invalidate them.
