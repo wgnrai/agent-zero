@@ -1,7 +1,7 @@
 (() => {
   const GLOBAL_KEY = "__spaceBrowserPageContent__";
   const DOM_HELPER_KEY = "__spaceBrowserDomHelper__";
-  const VERSION = "13";
+  const VERSION = "14";
   const REQUIRED_API_NAMES = Object.freeze([
     "annotate",
     "boundingBoxFor",
@@ -535,7 +535,19 @@
     }
 
     if (typeof value === "string") {
-      return value.trim();
+      let normalized = value.trim();
+      if (/^\[.*\]$/u.test(normalized)) {
+        normalized = normalized.slice(1, -1).trim();
+      }
+      if (/^\d+$/u.test(normalized)) {
+        return normalized;
+      }
+      // Agent-facing refs are kind-prefixed labels ("link 1", "[input text 8]")
+      // while the entry store is keyed by the bare numeric id, so extract the
+      // trailing digits (2026-09-12 browser input-dispatch fix). Ids without a
+      // trailing number keep the trimmed string (frame-chain ids unaffected).
+      const trailingDigits = normalized.match(/(\d+)\s*$/u);
+      return trailingDigits ? trailingDigits[1] : normalized;
     }
 
     if (value && typeof value === "object") {
