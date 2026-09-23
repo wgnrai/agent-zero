@@ -1206,15 +1206,29 @@ class Agent:
         try:
             await self.handle_intervention()
 
-            await tool.before_execution(**tool_args)
-            await self.handle_intervention()
-
+            try:  # TEMP DIAGNOSTIC (secrets trace) - remove after dev-ticket-2026-09-12
+                import datetime as _dt
+                _ph = chr(167) * 2 + 'secret('
+                _sc = {k: (len(v), v.startswith(_ph), id(v)) for k, v in tool_args.items() if isinstance(v, str)}
+                with open('/a0/usr/workdir/secrets-trace.log', 'a') as _f:
+                    _f.write(f"{_dt.datetime.now().strftime('%H:%M:%S.%f')[:-3]} PRE req={tool_name} id_ta={id(tool_args)} id_targs={id(tool.args)} {_sc}\n")
+            except Exception:
+                pass
             await extension.call_extensions_async(
                 "tool_execute_before",
                 self,
                 tool_args=tool_args or {},
                 tool_name=tool_name,
             )
+            # Re-sync the tool's stored args with the (possibly hook-mutated)
+            # dict so execute() kwargs and tool.args cannot fork after the hook.
+            tool.args = tool_args
+            try:  # TEMP DIAGNOSTIC (secrets trace) - remove after dev-ticket-2026-09-12
+                _sc = {k: (len(v), v.startswith(_ph), id(v)) for k, v in tool_args.items() if isinstance(v, str)}
+                with open('/a0/usr/workdir/secrets-trace.log', 'a') as _f:
+                    _f.write(f"{_dt.datetime.now().strftime('%H:%M:%S.%f')[:-3]} POST req={tool_name} id_ta={id(tool_args)} id_targs={id(tool.args)} same={tool.args is tool_args} {_sc}\n")
+            except Exception:
+                pass
 
             response = await tool.execute(**tool_args)
             await self.handle_intervention()
@@ -1489,12 +1503,30 @@ class Agent:
                     await self.handle_intervention()
 
                     # Allow extensions to preprocess tool arguments
+                    try:  # TEMP DIAGNOSTIC (secrets trace) - remove after dev-ticket-2026-09-12
+                        import datetime as _dt
+                        _ph = chr(167) * 2 + 'secret('
+                        _sc = {k: (len(v), v.startswith(_ph), id(v)) for k, v in tool_args.items() if isinstance(v, str)}
+                        with open('/a0/usr/workdir/secrets-trace.log', 'a') as _f:
+                            _f.write(f"{_dt.datetime.now().strftime('%H:%M:%S.%f')[:-3]} PRE-PT req={tool_name} id_ta={id(tool_args)} id_targs={id(tool.args)} {_sc}\n")
+                    except Exception:
+                        pass
                     await extension.call_extensions_async(
                         "tool_execute_before",
                         self,
                         tool_args=tool_args or {},
                         tool_name=tool_name,
                     )
+                    # Re-sync the tool's stored args with the (possibly
+                    # hook-mutated) dict so execute() kwargs and tool.args
+                    # cannot fork after the hook.
+                    tool.args = tool_args
+                    try:  # TEMP DIAGNOSTIC (secrets trace) - remove after dev-ticket-2026-09-12
+                        _sc = {k: (len(v), v.startswith(_ph), id(v)) for k, v in tool_args.items() if isinstance(v, str)}
+                        with open('/a0/usr/workdir/secrets-trace.log', 'a') as _f:
+                            _f.write(f"{_dt.datetime.now().strftime('%H:%M:%S.%f')[:-3]} POST-PT req={tool_name} id_ta={id(tool_args)} id_targs={id(tool.args)} same={tool.args is tool_args} {_sc}\n")
+                    except Exception:
+                        pass
 
                     response = await tool.execute(**tool_args)
                     await self.handle_intervention()

@@ -2118,7 +2118,12 @@ def test_browser_content_helper_keeps_label_wrapped_controls_referenceable():
         PROJECT_ROOT / "plugins" / "_browser" / "assets" / "browser-page-content.js"
     ).read_text(encoding="utf-8")
 
-    assert 'const VERSION = "13"' in helper
+    assert 'const VERSION = "14"' in helper
+    # 2026-09-12 input-dispatch fix: normalizeReferenceId must strip the
+    # agent-facing kind prefix ("link 1" / "[input text 8]") down to the
+    # bare numeric id the entry store is keyed by.
+    assert "const trailingDigits = normalized.match(/(\\d+)\\s*$/u);" in helper
+    assert "if (/^\\[.*\\]$/u.test(normalized)) {" in helper
     assert "function patchOpenShadowDom" in helper
     assert "Element.prototype.attachShadow = patched" in helper
     assert "const REQUIRED_API_NAMES = Object.freeze([" in helper

@@ -178,7 +178,13 @@ class Browser(Tool):
                     await self._resolve_ref(runtime, browser_id, ref, selector, action),
                 )
             elif action == "evaluate":
-                result = await runtime.call("evaluate", browser_id, script)
+                # Agents naturally pass JavaScript as `code`; before the
+                # 2026-09-12 fix it was silently dropped via **kwargs and the
+                # runtime evaluated the literal 'undefined' (result: null).
+                result = await runtime.call(
+                    "evaluate", browser_id,
+                    script or str(kwargs.get("code") or ""),
+                )
             elif action in {"key_chord", "keychord"}:
                 if not keys:
                     raise ValueError("key_chord requires non-empty 'keys' list")
@@ -351,7 +357,7 @@ class Browser(Tool):
         required: bool = True,
     ) -> int | str | None:
         if cls._has_ref(ref):
-            return ref
+            return cls._normalize_ref_id(ref)
 
         selector = str(selector or "").strip()
         if selector:
@@ -366,6 +372,22 @@ class Browser(Tool):
         if required:
             return cls._require_ref(ref)
         return None
+
+    @staticmethod
+    def _normalize_ref_id(ref: int | str) -> int | str:
+        """Normalize an agent-facing ref to the bare numeric id the content
+        helper stores ("link 1" / "[link 1]" / "input text 8" -> "1"/"8").
+        Mirrors the JS-side normalizeReferenceId fix (2026-09-12 browser
+        input-dispatch fix); numeric and non-numeric ids pass through."""
+        if isinstance(ref, int):
+            return ref
+        text = str(ref).strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1].strip()
+        if text.isdigit():
+            return int(text)
+        match = re.search(r"(\d+)\s*$", text)
+        return match.group(1) if match else str(ref).strip()
 
     @staticmethod
     def _first_ref_from_content(content: Any, selector: str = "") -> str | None:

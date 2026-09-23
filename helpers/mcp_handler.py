@@ -153,6 +153,78 @@ def _normalize_stdio_args(value: Any) -> list[str]:
     return args
 
 
+# >>> wgnr_secrets_guard: mcp secret alias resolution >>>
+_MCP_SECRET_ALIAS_LEAD = chr(0xA7) * 2 + "secret("
+
+
+def resolve_mcp_secret_aliases(
+    values: dict[str, Any] | None,
+    *,
+    server_name: str = "",
+    surface: str = "env",
+) -> dict[str, Any] | None:
+    """Resolve secret aliases in MCP server config values.
+
+    MCP server env/headers round-trip through the WebUI's secret masking with
+    no matching unmask, so stored values can hold literal alias placeholders
+    instead of the secret itself. Nothing else resolves aliases on this
+    surface, so the placeholder reaches the MCP client verbatim and the server
+    fails with an encoding or auth error.
+
+    Values without an alias marker are copied through byte-identically: the
+    child process receives exactly what the operator wrote.
+
+    Resolution is best-effort. ``SecretsManager.replace_placeholders`` raises
+    ``RepairableException`` for a key that is not in the secrets store -- some
+    MCP keys legitimately resolve through the framework variables system,
+    which the secrets manager does not read. An unresolvable alias is left
+    untouched and reported once, so the server fails with its own error rather
+    than with a masking crash.
+    """
+    if not values:
+        return values
+
+    pending: list[tuple[str, str]] = []
+    for key, value in values.items():
+        if isinstance(value, str) and _MCP_SECRET_ALIAS_LEAD in value:
+            pending.append((key, value))
+
+    if not pending:
+        return values
+
+    try:
+        from helpers.secrets import get_secrets_manager
+
+        manager = get_secrets_manager()
+    except Exception as exc:  # secrets layer unavailable -- never break transport
+        PrintStyle().warning(
+            "MCP server '{}': secret alias resolution unavailable ({}); "
+            "{} {} value(s) left as stored: {}".format(
+                server_name,
+                type(exc).__name__,
+                len(pending),
+                surface,
+                ", ".join(key for key, _ in pending),
+            )
+        )
+        return values
+
+    resolved: dict[str, Any] = dict(values)
+    for key, raw in pending:
+        try:
+            resolved[key] = manager.replace_placeholders(raw)
+        except Exception as exc:
+            PrintStyle().warning(
+                "MCP server '{}': unresolved secret alias in {}.{} ({}); "
+                "value left as stored".format(
+                    server_name, surface, key, type(exc).__name__
+                )
+            )
+
+    return resolved
+# <<< wgnr_secrets_guard: mcp secret alias resolution <<<
+
+
 def initialize_mcp(mcp_servers_config: str):
     if not MCPConfig.get_instance().is_initialized():
         try:
@@ -1569,7 +1641,9 @@ class MCPClientLocal(MCPClientBase):
         server_params = StdioServerParameters(
             command=server.command,
             args=server.args,
-            env=server.env,
+            env=resolve_mcp_secret_aliases(
+                server.env, server_name=server.name, surface="env"
+            ),
             encoding=server.encoding,
             encoding_error_handler=server.encoding_error_handler,
         )
@@ -1648,13 +1722,16 @@ class MCPClientRemote(MCPClientBase):
         )
 
         client_factory = CustomHTTPClientFactory(verify=server.verify)
+        resolved_headers = resolve_mcp_secret_aliases(
+            server.headers, server_name=server.name, surface="headers"
+        )
         # Check if this is a streaming HTTP type
         if _is_streaming_http_type(server.type):
             # Use streamable HTTP client
             transport_result = await current_exit_stack.enter_async_context(
                 streamablehttp_client(
                     url=server.url,
-                    headers=server.headers,
+                    headers=resolved_headers,
                     timeout=timedelta(seconds=init_timeout),
                     sse_read_timeout=timedelta(seconds=tool_timeout),
                     httpx_client_factory=client_factory,
@@ -1672,7 +1749,7 @@ class MCPClientRemote(MCPClientBase):
             stdio_transport = await current_exit_stack.enter_async_context(
                 sse_client(
                     url=server.url,
-                    headers=server.headers,
+                    headers=resolved_headers,
                     timeout=init_timeout,
                     sse_read_timeout=tool_timeout,
                     httpx_client_factory=client_factory,
